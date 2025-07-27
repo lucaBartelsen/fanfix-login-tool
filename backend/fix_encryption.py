@@ -2,14 +2,20 @@
 Script to re-encrypt credentials with a new encryption key
 """
 from sqlalchemy.orm import Session
-from app.models.base import SessionLocal
-from app.models.credential import Credential
+from app.models.base import SessionLocal, Base, engine
 from app.core.security import encrypt_password
 from cryptography.fernet import Fernet
 import os
 from dotenv import load_dotenv
 
+# Import all models to ensure relationships are loaded
+from app.models.user import User
+from app.models.credential import Credential
+
 load_dotenv()
+
+# Create all tables
+Base.metadata.create_all(bind=engine)
 
 def fix_credentials():
     """Re-encrypt all credentials with current encryption key"""
@@ -36,7 +42,6 @@ def fix_credentials():
             print("Deleted old test credential")
         
         # Create new test credential with current encryption key
-        from app.models.user import User
         admin_user = db.query(User).filter(User.username == "admin").first()
         
         if admin_user:
