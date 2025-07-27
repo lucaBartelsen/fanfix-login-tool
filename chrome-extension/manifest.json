@@ -7,7 +7,8 @@
     "storage",
     "tabs",
     "cookies",
-    "webRequest"
+    "webRequest",
+    "scripting"
   ],
   "host_permissions": [
     "https://auth.fanfix.io/*",
@@ -26,6 +27,13 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://auth.fanfix.io/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_start"
+    }
+  ],
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",

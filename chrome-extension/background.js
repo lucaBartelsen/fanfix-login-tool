@@ -1,9 +1,7 @@
-let playwright = null;
-
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'login') {
     performLogin(request.username, request.password)
-      .then(() => sendResponse({ success: true }))
+      .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true; // Keep the message channel open for async response
   }
@@ -14,75 +12,100 @@ async function performLogin(username, password) {
     // Clear existing cookies for FanFix
     await clearFanFixCookies();
     
-    // Create a new tab with FanFix login page
+    // Create a new tab with the login page
     const tab = await chrome.tabs.create({
       url: 'https://auth.fanfix.io/login',
       active: true
     });
     
-    // Wait for the page to load
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    const tabId = tab.id;
+    console.log('Created tab with ID:', tabId);
     
-    // Inject login script
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: autoLogin,
-      args: [username, password]
+    // Wait for page to be ready
+    await new Promise((resolve) => {
+      chrome.tabs.onUpdated.addListener(function listener(updatedTabId, changeInfo) {
+        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      });
+    });
+    
+    // Small delay to ensure content script is loaded
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Send credentials to content script
+    // The content script will intercept the fetch request and inject real credentials
+    try {
+      await chrome.tabs.sendMessage(tabId, {
+        action: 'fillAndSubmit',
+        credentials: {
+          username: username,
+          password: password
+        }
+      });
+    } catch (error) {
+      console.error('Failed to send message to content script:', error);
+      throw error;
+    }
+    
+    // Wait for redirect to creator dashboard
+    return new Promise((resolve) => {
+      let checkCount = 0;
+      const maxChecks = 20; // 10 seconds total
+      
+      const checkInterval = setInterval(async () => {
+        checkCount++;
+        
+        try {
+          const currentTab = await chrome.tabs.get(tabId);
+          
+          if (currentTab.url && currentTab.url.includes('creator.fanfix.io')) {
+            clearInterval(checkInterval);
+            resolve({ success: true });
+          } else if (checkCount >= maxChecks) {
+            clearInterval(checkInterval);
+            resolve({ success: false, error: 'Login timeout - no redirect detected' });
+          }
+        } catch (e) {
+          // Tab might be closed
+          clearInterval(checkInterval);
+          resolve({ success: false, error: 'Tab was closed' });
+        }
+      }, 500);
     });
     
   } catch (error) {
     console.error('Login error:', error);
-    throw error;
+    return { success: false, error: error.message };
   }
 }
 
 async function clearFanFixCookies() {
-  const cookies = await chrome.cookies.getAll({ domain: '.fanfix.io' });
-  for (const cookie of cookies) {
-    await chrome.cookies.remove({
-      url: `https://${cookie.domain}${cookie.path}`,
-      name: cookie.name
-    });
-  }
-}
-
-// This function will be injected into the FanFix login page
-function autoLogin(username, password) {
-  const fillAndSubmit = () => {
-    // Wait for the form elements to be present
-    const emailInput = document.querySelector('input[type="email"], input[name="email"], input[placeholder*="email" i]');
-    const passwordInput = document.querySelector('input[type="password"], input[name="password"]');
-    const submitButton = document.querySelector('button[type="submit"], button:has-text("Sign in"), button:has-text("Log in")');
+  try {
+    // Get all cookies for fanfix.io domains
+    const cookies = await chrome.cookies.getAll({ domain: '.fanfix.io' });
     
-    if (emailInput && passwordInput) {
-      // Fill in the credentials
-      emailInput.value = username;
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-      emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+    for (const cookie of cookies) {
+      // Fix the domain - remove leading dot for URL construction
+      const domain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
+      const url = `https://${domain}${cookie.path}`;
       
-      passwordInput.value = password;
-      passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
-      passwordInput.dispatchEvent(new Event('change', { bubbles: true }));
-      
-      // Submit the form
-      if (submitButton) {
-        setTimeout(() => {
-          submitButton.click();
-        }, 500);
-      } else {
-        // Try to submit the form directly
-        const form = emailInput.closest('form');
-        if (form) {
-          setTimeout(() => {
-            form.submit();
-          }, 500);
-        }
-      }
-    } else {
-      // Retry if elements not found
-      setTimeout(fillAndSubmit, 500);
+      await chrome.cookies.remove({
+        url: url,
+        name: cookie.name
+      });
     }
-  };
-  
-  fillAndSubmit();
+    
+    // Also clear cookies for auth.fanfix.io specifically
+    const authCookies = await chrome.cookies.getAll({ domain: 'auth.fanfix.io' });
+    for (const cookie of authCookies) {
+      await chrome.cookies.remove({
+        url: `https://auth.fanfix.io${cookie.path}`,
+        name: cookie.name
+      });
+    }
+  } catch (error) {
+    console.error('Error clearing cookies:', error);
+  }
 }
