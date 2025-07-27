@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:8000';
+const API_URL = 'https://api.chatsassistant.com';
 let authToken = null;
 
 document.addEventListener('DOMContentLoaded', async () => {

@@ -12,6 +12,7 @@
   "host_permissions": [
     "https://auth.fanfix.io/*",
     "https://fanfix.io/*",
+    "https://api.chatsassistant.com/*",
     "http://localhost:8000/*"
   ],
   "action": {
